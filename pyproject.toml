@@ -1,0 +1,33 @@
+[project]
+name = "weather-forecast-mcp-server"
+version = "1.0.0"
+description = "MCP server for weather forecasts using the National Weather Service API"
+authors = [
+    { name = "Nils Friedrichs" }
+]
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+
+dependencies = [
+    "mcp[cli]>=1.2.0",
+    "httpx>=0.28.0",
+]
+
+[project.urls]
+Homepage = "https://friedrichs-it.de/blog/weather-forecast-api-as-stdio-python-mcp-server"
+Repository = "https://github.com/slin-master/weather-forecast-mcp-server"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/weather_forecast_mcp_server"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "src/weather_forecast_mcp_server",
+  "README.md",
+  "pyproject.toml",
+]

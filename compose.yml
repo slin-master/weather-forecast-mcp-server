@@ -1,0 +1,31 @@
+services:
+  weather-mcp:
+    build: .
+    container_name: weather-mcp-server
+    restart: unless-stopped
+
+    # For stdio: not needed (spawn container per request)
+    # For HTTP: expose port
+    ports:
+      - "8000:8000"
+
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+    # Security options
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+
+    # Health check
+    healthcheck:
+      test: [ "CMD", "python", "-c", "import sys; sys.exit(0)" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
