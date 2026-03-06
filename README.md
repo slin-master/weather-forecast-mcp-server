@@ -11,10 +11,12 @@ A [Model Context Protocol](https://modelcontextprotocol.io) (MCP) server that pr
 ## Features
 
 - ✅ **3 MCP Tools**: `geocode_city`, `get_forecast`, `get_alerts`
+- ✅ **1 MCP Resource Template**: `weather://climate/normals/{location}/{month}`
 - ✅ **Process Isolation**: Runs as independent server with scoped credentials
 - ✅ **stdio Transport**: Local development with Claude Desktop
 - ✅ **Docker Ready**: Production deployment with security hardening
-- ✅ **No API Key Required**: Uses free National Weather Service API
+- ✅ **No API Key Required for Forecasts**: Uses free National Weather Service API
+- ✅ **Optional Climate Normals**: NOAA CDO integration via `NOAA_API_TOKEN`
 - ✅ **Async/Await**: Non-blocking I/O for efficient request handling
 
 ## Quick Start
@@ -195,6 +197,13 @@ weather-forecast-mcp-server/
 - Returns warnings, watches, and advisories
 - Includes severity, urgency, and expiration
 
+### Available Resources
+
+**`weather://climate/normals/{location}/{month}`**
+- Reads 30-year climate normals (1991-2020)
+- Example URI: `weather://climate/normals/seattle-wa/01`
+- Requires `NOAA_API_TOKEN` for NOAA CDO API access
+
 ## Comparing to Agent Skills
 
 This server provides the **same weather functionality** as the [Agent Skills version](https://github.com/slin-master/weather-forecast-skills), but with different architecture:
@@ -256,6 +265,23 @@ This repository accompanies a comprehensive tutorial covering:
 - Dependencies: See `pyproject.toml`
 - Docker (optional, for containerized deployment)
 
+## Validation
+
+Run the same checks used for release gating:
+
+```bash
+uv run python -m py_compile src/weather_forecast_mcp_server/server.py
+timeout 8s uv run mcp run src/weather_forecast_mcp_server/server.py
+uv run python - <<'PY'
+import asyncio
+from weather_forecast_mcp_server.server import geocode_city
+print(asyncio.run(geocode_city("Seattle, WA")))
+PY
+docker compose -f compose.yml config
+docker compose -f compose.yml build weather-mcp
+uv run --group dev pytest
+```
+
 ## Contributing
 
 Contributions welcome! Please:
@@ -268,7 +294,6 @@ Contributions welcome! Please:
 
 ### Ideas for Contributions
 
-- [ ] Add Resources capability (weather history data)
 - [ ] Add Prompts capability (common weather queries)
 - [ ] Implement caching layer (Redis)
 - [ ] Add authentication for HTTP transport

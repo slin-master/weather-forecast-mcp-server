@@ -4,6 +4,9 @@ services:
     container_name: weather-mcp-server
     restart: unless-stopped
 
+    environment:
+      - NOAA_API_TOKEN=${NOAA_API_TOKEN}
+
     # For stdio: not needed (spawn container per request)
     # For HTTP: expose port
     ports:
