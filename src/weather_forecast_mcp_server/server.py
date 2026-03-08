@@ -4,11 +4,14 @@ Weather forecast MCP server with Tools and Resources using National Weather Serv
 """
 import json
 import os
+from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import httpx
 from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
+from mcp.types import CallToolResult, TextContent
 
 # Load environment variables
 load_dotenv()
@@ -22,6 +25,29 @@ NOAA_CDO_BASE = "https://www.ncei.noaa.gov/cdo-web/api/v2"
 NOMINATIM_BASE = "https://nominatim.openstreetmap.org"
 USER_AGENT = "WeatherMCPServer/2.0 (https://github.com/slin-master/weather-forecast-mcp-server)"
 NOAA_TOKEN = os.getenv("NOAA_API_TOKEN")
+UI_DASHBOARD_PATH = Path(__file__).parent / "ui" / "weather_dashboard.html"
+MCP_APP_MIME_TYPE = "text/html;profile=mcp-app"
+
+
+def _enable_mcp_apps_capability() -> None:
+    """
+    FastMCP does not expose experimental capabilities in its high-level API.
+    Patch initialization options so hosts can detect MCP App support.
+    """
+    base_create_init = mcp._mcp_server.create_initialization_options
+
+    def patched_create_initialization_options(notification_options=None, experimental_capabilities=None):
+        merged = dict(experimental_capabilities or {})
+        merged.setdefault("mcpui", {"mimeTypes": [MCP_APP_MIME_TYPE]})
+        return base_create_init(
+            notification_options=notification_options,
+            experimental_capabilities=merged,
+        )
+
+    mcp._mcp_server.create_initialization_options = patched_create_initialization_options
+
+
+_enable_mcp_apps_capability()
 
 # Month name to number mapping
 MONTH_MAP = {
@@ -228,6 +254,121 @@ async def get_alerts(latitude: float, longitude: float) -> dict[str, Any]:
 
         except httpx.HTTPError as e:
             return {"error": f"Failed to fetch alerts: {str(e)}"}
+
+
+@mcp.resource(
+    "ui://weather/dashboard",
+    mime_type=MCP_APP_MIME_TYPE,
+    meta={
+        "ui": {
+            "csp": {
+                "connectDomains": [
+                    "https://api.weather.gov",
+                ],
+                "resourceDomains": [],
+            }
+        }
+    },
+)
+async def weather_dashboard_resource() -> str:
+    """
+    Serve the weather dashboard app UI for MCP hosts that support app rendering.
+    """
+    if UI_DASHBOARD_PATH.exists():
+        return UI_DASHBOARD_PATH.read_text(encoding="utf-8")
+
+    return """<!DOCTYPE html><html><body><h1>Weather Dashboard</h1><p>Dashboard UI file is missing.</p></body></html>"""
+
+
+@mcp.tool(
+    title="Weather Forecast Dashboard",
+    description="Get a 7-day weather forecast payload for the dashboard app.",
+    meta={
+        "ui": {
+            "resourceUri": "ui://weather/dashboard"
+        },
+        # Backward-compatible key for hosts still expecting flat metadata.
+        "ui/resourceUri": "ui://weather/dashboard"
+    }
+)
+async def get_forecast_dashboard(latitude: float, longitude: float) -> CallToolResult:
+    """
+    Get weather forecast data formatted for MCP App dashboard rendering.
+    """
+    async with httpx.AsyncClient() as client:
+        try:
+            points_response = await client.get(
+                f"{NWS_API_BASE}/points/{latitude},{longitude}",
+                headers={"User-Agent": USER_AGENT},
+                timeout=10.0
+            )
+
+            if points_response.status_code == 404:
+                return CallToolResult(
+                    content=[TextContent(type="text", text="Location is outside National Weather Service coverage.")],
+                    isError=True
+                )
+
+            points_response.raise_for_status()
+            points_data = points_response.json()
+
+            forecast_url = points_data["properties"]["forecast"]
+            forecast_response = await client.get(
+                forecast_url,
+                headers={"User-Agent": USER_AGENT},
+                timeout=10.0
+            )
+            forecast_response.raise_for_status()
+            forecast_data = forecast_response.json()
+
+            periods = forecast_data["properties"]["periods"][:14]
+            if not periods:
+                return CallToolResult(
+                    content=[TextContent(type="text", text="No forecast periods available for this location.")],
+                    isError=True
+                )
+
+            chart_data = [
+                {
+                    "name": period.get("name"),
+                    "temperature": period.get("temperature"),
+                    "temperatureUnit": period.get("temperatureUnit", "F"),
+                    "windSpeed": period.get("windSpeed", "0 mph"),
+                    "shortForecast": period.get("shortForecast", ""),
+                    "precipitationProbability": (period.get("probabilityOfPrecipitation") or {}).get("value", 0) or 0,
+                }
+                for period in periods
+            ]
+
+            city = points_data["properties"]["relativeLocation"]["properties"].get("city", "Unknown")
+            state = points_data["properties"]["relativeLocation"]["properties"].get("state", "")
+            summary = chart_data[0]["shortForecast"] or "Forecast loaded"
+            location_label = f"{city}, {state}".strip(", ")
+
+            return CallToolResult(
+                content=[
+                    TextContent(
+                        type="text",
+                        text=f"Loaded dashboard forecast for {location_label}: {summary}."
+                    )
+                ],
+                _meta={
+                    "viewUUID": str(uuid4()),
+                    "forecast": chart_data,
+                    "location": {
+                        "lat": latitude,
+                        "lon": longitude,
+                        "city": city,
+                        "state": state,
+                    }
+                }
+            )
+
+        except (httpx.HTTPError, KeyError, IndexError) as e:
+            return CallToolResult(
+                content=[TextContent(type="text", text=f"Error fetching dashboard forecast: {str(e)}")],
+                isError=True
+            )
 
 
 @mcp.resource("weather://climate/normals/{location}/{month}")

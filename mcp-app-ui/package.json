@@ -1,0 +1,19 @@
+{
+  "name": "weather-dashboard-mcp-app-ui",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build && cp ../src/weather_forecast_mcp_server/ui/index.html ../src/weather_forecast_mcp_server/ui/weather_dashboard.html"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.2",
+    "vite": "^5.4.3",
+    "vite-plugin-singlefile": "^2.0.2"
+  }
+}

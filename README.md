@@ -10,14 +10,15 @@ A [Model Context Protocol](https://modelcontextprotocol.io) (MCP) server that pr
 
 ## Features
 
-- ✅ **3 MCP Tools**: `geocode_city`, `get_forecast`, `get_alerts`
-- ✅ **1 MCP Resource Template**: `weather://climate/normals/{location}/{month}`
+- ✅ **4 MCP Tools**: `geocode_city`, `get_forecast`, `get_alerts`, `get_forecast_dashboard`
+- ✅ **2 MCP Resources**: `weather://climate/normals/{location}/{month}` and `ui://weather/dashboard`
 - ✅ **Process Isolation**: Runs as independent server with scoped credentials
 - ✅ **stdio Transport**: Local development with Claude Desktop
 - ✅ **Docker Ready**: Production deployment with security hardening
 - ✅ **No API Key Required for Forecasts**: Uses free National Weather Service API
 - ✅ **Optional Climate Normals**: NOAA CDO integration via `NOAA_API_TOKEN`
 - ✅ **Async/Await**: Non-blocking I/O for efficient request handling
+- ✅ **MCP App Example**: Interactive weather dashboard served directly from this Python server
 
 ## Quick Start
 
@@ -111,8 +112,83 @@ Restart Claude Desktop, then try:
 - "What's the weather in Portland, Oregon?"
 - "Are there any weather alerts in Miami?"
 - "Will it rain in Seattle this week?"
+- "Show me Seattle's weather dashboard."
 
 Claude will invoke your MCP server's tools to fetch real-time data!
+
+## Part 3: MCP App Dashboard
+
+This repository now includes a minimal MCP App implementation for the tutorial's Part 3:
+
+- Tool: `get_forecast_dashboard(latitude, longitude)`
+- UI Resource: `ui://weather/dashboard`
+- Runtime UI file: `src/weather_forecast_mcp_server/ui/weather_dashboard.html`
+- React source: `mcp-app-ui/src/main.jsx`
+
+How it works:
+1. The tool fetches forecast data from NWS and returns chart-ready data in `_meta.forecast`.
+2. The tool metadata declares `_meta.ui.resourceUri = "ui://weather/dashboard"`.
+3. MCP hosts that support Apps render the dashboard resource and pass tool results to the iframe.
+
+### Build the React UI
+
+The dashboard follows a hybrid approach:
+- Python/FastMCP serves tools/resources and protocol behavior.
+- React (Vite) handles UI rendering and interaction.
+
+From repository root:
+
+```bash
+cd mcp-app-ui
+npm install
+npm run build
+```
+
+This writes a single-file dashboard artifact to:
+- `src/weather_forecast_mcp_server/ui/weather_dashboard.html`
+
+### Claude Desktop Rendering (Recommended Bridge Server)
+
+If your client discovers the tool but does not render the app panel, run the ext-apps bridge server for maximum host compatibility.
+
+Install and start from repository root:
+
+```bash
+cd mcp-app-server
+npm install
+node server.mjs
+```
+
+Claude Desktop config entry:
+
+```json
+{
+  "mcpServers": {
+    "weather-app-bridge": {
+      "command": "node",
+      "args": [
+        "/absolute/path/to/weather-forecast-mcp-server/mcp-app-server/server.mjs"
+      ]
+    }
+  }
+}
+```
+
+Then start a new chat and call:
+- `weather-app-bridge:get_forecast_dashboard`
+
+### Quick Validation
+
+1. Start the server with stdio transport (`uv run mcp run src/weather_forecast_mcp_server/server.py`).
+2. Connect with an MCP host that supports Apps.
+3. Invoke `get_forecast_dashboard` with US coordinates.
+4. Confirm the interactive dashboard renders and switches between Temperature, Precipitation, and Wind views.
+
+### Current Limitations
+
+- UI-to-model context updates are host-dependent and not guaranteed in all clients.
+- App rendering is host-dependent; some MCP tooling can show tool outputs without rendering the iframe UI.
+- Forecast coverage remains US-only because it depends on the National Weather Service API.
 
 ## Docker Deployment
 
@@ -166,7 +242,8 @@ This server implements the [MCP specification 2025-11-25](https://modelcontextpr
 ```
 weather-forecast-mcp-server/
 ├── src/weather_forecast_mcp_server/
-│   └── server.py           # FastMCP server with 3 tools
+│   ├── server.py                  # FastMCP server with tools/resources
+│   └── ui/weather_dashboard.html  # MCP App dashboard resource
 ├── pyproject.toml          # Dependencies and metadata
 ├── Dockerfile              # Production container
 └── compose.yml             # Docker orchestration
@@ -197,12 +274,22 @@ weather-forecast-mcp-server/
 - Returns warnings, watches, and advisories
 - Includes severity, urgency, and expiration
 
+**`get_forecast_dashboard(latitude: float, longitude: float)`**
+- Returns 7-day/day-night periods in a UI-friendly payload
+- Includes `_meta.forecast` and `_meta.location` for dashboard rendering
+- Declares `ui://weather/dashboard` for MCP App hosts
+
 ### Available Resources
 
 **`weather://climate/normals/{location}/{month}`**
 - Reads 30-year climate normals (1991-2020)
 - Example URI: `weather://climate/normals/seattle-wa/01`
 - Requires `NOAA_API_TOKEN` for NOAA CDO API access
+
+**`ui://weather/dashboard`**
+- Serves an embeddable HTML dashboard resource
+- MIME type: `text/html;profile=mcp-app`
+- Used by `get_forecast_dashboard`
 
 ## Comparing to Agent Skills
 
