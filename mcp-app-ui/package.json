@@ -8,6 +8,7 @@
     "build": "vite build && cp ../src/weather_forecast_mcp_server/ui/index.html ../src/weather_forecast_mcp_server/ui/weather_dashboard.html"
   },
   "dependencies": {
+    "@modelcontextprotocol/ext-apps": "^1.0.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },

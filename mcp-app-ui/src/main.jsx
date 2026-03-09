@@ -1,18 +1,19 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
+import { App as McpApp, PostMessageTransport } from '@modelcontextprotocol/ext-apps';
 
 const styles = {
   app: {
-    minHeight: '100vh',
+    minHeight: 'auto',
     background: 'linear-gradient(135deg, #1a2a4a 0%, #2d4a7a 50%, #1e3a5f 100%)',
     display: 'flex',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     justifyContent: 'center',
     fontFamily: "'Segoe UI', system-ui, -apple-system, sans-serif",
-    padding: '24px',
+    padding: '16px',
     color: '#fff'
   },
-  wrapper: { width: '100%', maxWidth: '680px' },
+  wrapper: { width: '100%', maxWidth: '760px' },
   header: { textAlign: 'center', marginBottom: '24px' },
   location: { fontSize: 13, color: '#7eb8f7', letterSpacing: 2, textTransform: 'uppercase', marginBottom: 8 },
   icon: { fontSize: 70, lineHeight: 1 },
@@ -38,10 +39,10 @@ const styles = {
     padding: 18, backdropFilter: 'blur(12px)'
   },
   panelTitle: { fontSize: 12, color: '#7eb8f7', letterSpacing: 2, textTransform: 'uppercase', marginBottom: 12 },
-  days: { display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: 8 },
-  day: { textAlign: 'center', padding: '10px 8px', borderRadius: 12, border: '1px solid transparent', cursor: 'pointer' },
+  days: { display: 'grid', gridTemplateColumns: 'repeat(5, minmax(96px, 1fr))', gap: 12, overflowX: 'auto', paddingBottom: 4 },
+  day: { textAlign: 'center', padding: '10px 8px', borderRadius: 12, border: '1px solid transparent', cursor: 'pointer', minWidth: 96 },
   dayActive: { background: 'rgba(126,184,247,0.2)', border: '1px solid rgba(126,184,247,0.4)' },
-  dayName: { fontSize: 11, color: '#7eb8f7', marginBottom: 6 },
+  dayName: { fontSize: 11, color: '#7eb8f7', marginBottom: 6, whiteSpace: 'nowrap' },
   dayIcon: { fontSize: 22, marginBottom: 6 },
   dayMain: { fontSize: 16, fontWeight: 600, marginBottom: 4 },
   daySub: { fontSize: 11, color: '#4a7aa8' },
@@ -63,45 +64,106 @@ function firstWord(label) {
   return String(label || 'N/A').split(' ')[0];
 }
 
-function readToolResult(raw) {
-  if (!raw) return null;
-  if (raw.method === 'ui/notifications/tool-result') {
-    return raw?.params?.result || raw?.params || raw?.result || null;
-  }
-  if (raw.type === 'toolResult') {
-    return raw.result || null;
-  }
-  return null;
-}
-
 function App() {
   const [forecast, setForecast] = useState([]);
   const [location, setLocation] = useState(null);
   const [view, setView] = useState('temperature');
   const [activeDay, setActiveDay] = useState(0);
+  const appRef = useRef(null);
+  const forecastRef = useRef([]);
 
   const dayPeriods = useMemo(() => forecast.filter((_, i) => i % 2 === 0).slice(0, 5), [forecast]);
   const selected = dayPeriods[activeDay] || dayPeriods[0] || {};
 
   useEffect(() => {
-    const onMessage = (event) => {
-      const result = readToolResult(event.data || {});
-      if (!result?._meta?.forecast || !Array.isArray(result._meta.forecast)) return;
-      setForecast(result._meta.forecast);
-      setLocation(result._meta.location || null);
+    forecastRef.current = forecast;
+  }, [forecast]);
+
+  async function loadForecastFromCoordinates(latitude, longitude) {
+    try {
+      const pointsResponse = await fetch(`https://api.weather.gov/points/${latitude},${longitude}`);
+      if (!pointsResponse.ok) return;
+      const pointsData = await pointsResponse.json();
+
+      const forecastUrl = pointsData?.properties?.forecast;
+      if (!forecastUrl) return;
+
+      const forecastResponse = await fetch(forecastUrl);
+      if (!forecastResponse.ok) return;
+      const forecastData = await forecastResponse.json();
+
+      const periods = (forecastData?.properties?.periods || []).slice(0, 14);
+      if (!periods.length) return;
+
+      const chartData = periods.map((period) => ({
+        name: period?.name,
+        temperature: period?.temperature,
+        temperatureUnit: period?.temperatureUnit || 'F',
+        windSpeed: period?.windSpeed || '0 mph',
+        shortForecast: period?.shortForecast || '',
+        precipitationProbability: period?.probabilityOfPrecipitation?.value || 0
+      }));
+
+      const city = pointsData?.properties?.relativeLocation?.properties?.city || 'Unknown';
+      const state = pointsData?.properties?.relativeLocation?.properties?.state || '';
+
+      setForecast(chartData);
+      setLocation({ lat: latitude, lon: longitude, city, state });
       setActiveDay(0);
+    } catch (error) {
+      console.warn('Could not load fallback forecast in app client:', error);
+    }
+  }
+
+  function applyToolResult(result) {
+    if (!result?._meta?.forecast || !Array.isArray(result._meta.forecast)) return;
+    setForecast(result._meta.forecast);
+    setLocation(result._meta.location || null);
+    setActiveDay(0);
+  }
+
+  useEffect(() => {
+    const app = new McpApp(
+      { name: 'weather-dashboard-view', version: '1.2.1' },
+      {},
+      { autoResize: true }
+    );
+    appRef.current = app;
+    app.ontoolresult = ({ result }) => {
+      applyToolResult(result);
+    };
+    app.ontoolinput = ({ arguments: args }) => {
+      const latitude = Number(args?.latitude);
+      const longitude = Number(args?.longitude);
+      if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
+      if (forecastRef.current.length > 0) return;
+      loadForecastFromCoordinates(latitude, longitude);
+    };
+    app.connect(new PostMessageTransport(window.parent, window.parent)).catch((error) => {
+      console.error('Failed to connect MCP App transport:', error);
+    });
+
+    // Backward-compatible fallback for hosts that don't fully implement App transport.
+    const onMessage = (event) => {
+      const result = event?.data?.params?.result || event?.data?.result || null;
+      applyToolResult(result);
     };
     window.addEventListener('message', onMessage);
-    return () => window.removeEventListener('message', onMessage);
+
+    return () => {
+      window.removeEventListener('message', onMessage);
+      appRef.current = null;
+      app.close().catch(() => {});
+    };
   }, []);
 
   function notifyViewChange(nextView) {
-    const message = {
-      method: 'ui/update-model-context',
-      params: { content: [{ type: 'text', text: `User switched dashboard view to ${nextView}.` }] }
-    };
-    window.parent.postMessage(message, '*');
-    window.parent.postMessage({ type: 'modelContextUpdate', payload: message.params }, '*');
+    const message = { content: [{ type: 'text', text: `User switched dashboard view to ${nextView}.` }] };
+    if (appRef.current) {
+      appRef.current.updateModelContext(message).catch(() => {});
+      return;
+    }
+    window.parent.postMessage({ method: 'ui/update-model-context', params: message }, '*');
   }
 
   function metricCards() {
@@ -109,16 +171,12 @@ function App() {
     const wind = Number(String(selected.windSpeed || '0').match(/\d+/)?.[0] || 0);
     const temp = Number(selected.temperature || 0);
 
-    const base = [
+    return [
       { label: 'Condition', value: selected.shortForecast || 'N/A', icon: toIcon(selected.shortForecast) },
-      { label: 'Rain Chance', value: `${precip}%`, icon: '💧' },
       { label: 'Temperature', value: `${temp}°${selected.temperatureUnit || 'F'}`, icon: '🌡️' },
+      { label: 'Rain Chance', value: `${precip}%`, icon: '💧' },
       { label: 'Wind', value: `${wind} mph`, icon: '💨' }
     ];
-
-    if (view === 'precipitation') return [base[0], base[1], base[2], base[3]];
-    if (view === 'wind') return [base[0], base[3], base[1], base[2]];
-    return [base[0], base[2], base[1], base[3]];
   }
 
   function dayMain(day) {
@@ -198,7 +256,7 @@ function App() {
           </div>
         </section>
 
-        <div style={styles.footer}>Powered by weather-forecast-mcp-server v1.2.0 · React UI</div>
+        <div style={styles.footer}>Powered by weather-forecast-mcp-server v1.2.1 · React UI</div>
       </main>
     </div>
   );

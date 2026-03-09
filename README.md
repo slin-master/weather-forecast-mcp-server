@@ -177,6 +177,12 @@ Claude Desktop config entry:
 Then start a new chat and call:
 - `weather-app-bridge:get_forecast_dashboard`
 
+If Claude still responds with plain text or a self-generated dashboard:
+- Ensure your App HTML was rebuilt (`mcp-app-ui/npm run build`) after changes.
+- Confirm the rendered app footer contains `Powered by weather-forecast-mcp-server` (visual fingerprint).
+- Keep using the bridge server path above; it follows the official `ext-apps` server registration pattern.
+- Open a fresh chat after restart (tool/resource discovery can be session-cached).
+
 ### Quick Validation
 
 1. Start the server with stdio transport (`uv run mcp run src/weather_forecast_mcp_server/server.py`).
